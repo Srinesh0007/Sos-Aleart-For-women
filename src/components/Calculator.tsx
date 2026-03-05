@@ -93,6 +93,12 @@ export default function Calculator({ onCodeEntered, onSOSTriggered, config }: Ca
       } else if (newSequence === config.adminCode) { // Admin code
         onCodeEntered('ADMIN');
         setInputSequence('');
+      } else if (newSequence === '9999#') { // Guardian code
+        onCodeEntered('GUARDIAN');
+        setInputSequence('');
+      } else if (newSequence === '8368#') { // Tent code
+        onCodeEntered('TENT');
+        setInputSequence('');
       }
     }
   };

@@ -43,20 +43,29 @@ export default function MotionTrigger({ config, onTrigger, isActive }: MotionTri
         const y = acceleration.y || 0;
         const z = acceleration.z || 0;
 
-        const speed = Math.abs(x + y + z - lastX.current - lastY.current - lastZ.current) / diffTime * 10000;
+        // Use absolute difference for each component to avoid cancellation
+        const deltaX = Math.abs(x - lastX.current);
+        const deltaY = Math.abs(y - lastY.current);
+        const deltaZ = Math.abs(z - lastZ.current);
 
-        // Detect sudden impact or shake
-        if (speed > shakeThreshold) {
+        // Calculate speed based on total change
+        // Multiplier 10000 / diffTime (approx 100ms) -> * 100
+        // So a change of 1 m/s^2 per component -> speed ~ 100
+        const speed = (deltaX + deltaY + deltaZ) / diffTime * 10000;
+
+        // Lowered threshold to 2000 for better responsiveness while avoiding walking triggers
+        if (speed > 2000) {
           console.log('Motion Trigger: High impact detected', speed);
           onTriggerRef.current();
         }
 
-        // Detect sudden free fall (acceleration drops near zero)
+        // Detect sudden free fall (acceleration drops near zero) followed by impact
         const totalAccel = Math.sqrt(x*x + y*y + z*z);
         if (totalAccel < fallThreshold && totalAccel > 0.1) {
            console.log('Motion Trigger: Potential fall detected', totalAccel);
-           // We might want a more sophisticated fall detection, but this is a start
-           // For now, let's just use impact as the primary trigger to avoid false positives
+           // If we detect free fall, we can be more sensitive to the subsequent impact
+           // But for now, let's just trigger if it's a clear free fall for a sustained period (which is hard to detect with just one event)
+           // Instead, let's rely on the impact.
         }
 
         lastX.current = x;

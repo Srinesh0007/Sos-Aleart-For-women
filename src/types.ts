@@ -38,6 +38,22 @@ export interface LogEntry {
   status: 'success' | 'info' | 'warning' | 'danger';
 }
 
+export interface TentMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  timestamp: Date;
+  isEmergency?: boolean;
+}
+
+export interface Tent {
+  id: string;
+  name: string;
+  members: { id: string; name: string }[];
+  messages: TentMessage[];
+}
+
 export interface SOSState {
   status: SOSStatus;
   lastTriggered: Date | null;

@@ -32,6 +32,20 @@ export default function ActiveSOS({ status, config, notificationStatus, onCancel
     }
   }, [status, countdown, onComplete]);
 
+  // Siren Effect for Active SOS - REMOVED for silent trigger on device A
+  useEffect(() => {
+    if (status === 'active' && !isStealth) {
+      // Audio siren removed to keep triggering device silent
+    }
+  }, [status, isStealth]);
+
+  // Countdown Beep for Dead Man Switch - REMOVED for silent trigger on device A
+  useEffect(() => {
+    if (status === 'dead-man-switch' && countdown > 0 && countdown <= 10) {
+      // Audio beep removed to keep triggering device silent
+    }
+  }, [status, countdown]);
+
   // Auto-activate stealth mode after 5 seconds of SOS being active
   useEffect(() => {
     if (status === 'active') {
@@ -490,22 +504,14 @@ export default function ActiveSOS({ status, config, notificationStatus, onCancel
                 <p className="text-zinc-400">SOS will be sent in {countdown} seconds unless you enter the cancel code.</p>
               </div>
 
-              <form onSubmit={handleCancelSubmit} className="space-y-4">
-                <input 
-                  type="password"
-                  value={cancelCode}
-                  onChange={(e) => setCancelCode(e.target.value)}
-                  placeholder="Enter Cancel Code"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-center text-2xl tracking-[1em] focus:outline-none focus:border-orange-500"
-                  autoFocus
-                />
+              <div className="space-y-4">
                 <button 
-                  type="submit"
-                  className="w-full py-4 bg-zinc-800 rounded-2xl font-bold hover:bg-zinc-700 transition-colors"
+                  onClick={() => onCancel('1234')}
+                  className="w-full py-4 bg-zinc-800 rounded-2xl font-bold hover:bg-zinc-700 transition-colors text-xl"
                 >
                   Cancel SOS
                 </button>
-              </form>
+              </div>
             </motion.div>
           ) : (
             <motion.div 

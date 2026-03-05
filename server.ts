@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
+import { WebSocketServer, WebSocket } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +45,72 @@ async function startServer() {
     }
   }));
 
+  // Create HTTP server explicitly to attach WebSocket
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  // Setup WebSocket Server
+  const wss = new WebSocketServer({ server });
+
+  // In-memory store for Tents
+  const tents: Map<string, any> = new Map();
+
+  wss.on('connection', (ws) => {
+    console.log('Client connected to WebSocket');
+    ws.on('error', console.error);
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        
+        // Handle Tent Messages
+        if (data.type === 'TENT_MESSAGE') {
+          const { tentId, message: msg } = data;
+          const tent = tents.get(tentId);
+          if (tent) {
+            tent.messages.push(msg);
+            // Broadcast to all
+            wss.clients.forEach((client) => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'TENT_MESSAGE_RECEIVED', tentId, message: msg }));
+              }
+            });
+          }
+        }
+
+        // Handle WebRTC Signaling for Tent Voice Call
+        if (data.type === 'TENT_SIGNAL') {
+          const { tentId, targetId, senderId, signal } = data;
+          wss.clients.forEach((client) => {
+            // Forward signal to target or broadcast if no target (for presence)
+            if (client.readyState === WebSocket.OPEN) {
+              // If targetId is specified, only send to that client
+              // (We don't have a mapping of clientId to ws, so we broadcast and clients filter)
+              client.send(JSON.stringify({ 
+                type: 'TENT_SIGNAL_RECEIVED', 
+                tentId, 
+                targetId, 
+                senderId, 
+                signal 
+              }));
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Error processing WS message:', e);
+      }
+    });
+  });
+
+  const broadcastSOS = (data: any) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'SOS_ALERT', ...data }));
+      }
+    });
+  };
+
   // API to upload evidence
   app.post("/api/evidence/upload", (req, res) => {
     const { id, type, data, timestamp } = req.body;
@@ -73,6 +140,10 @@ async function startServer() {
         fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
         console.log(`Saved evidence: ${fileName} to ${filePath}`);
         const fileUrl = `/evidence/${fileName}`;
+        
+        // Broadcast new evidence to guardians
+        broadcastSOS({ evidence: { id, type, url: fileUrl, timestamp } });
+        
         res.json({ success: true, url: fileUrl });
       } else {
         console.error("Invalid data format for upload");
@@ -193,7 +264,15 @@ async function startServer() {
 
   // API to send SOS notifications via Twilio
   app.post("/api/sos/notify", async (req, res) => {
-    const { contacts, location, message } = req.body;
+    const { contacts, location, message, senderId } = req.body;
+    
+    // Broadcast SOS to all connected clients immediately
+    broadcastSOS({ 
+      triggered: true, 
+      location, 
+      message,
+      senderId
+    });
     
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -232,6 +311,54 @@ async function startServer() {
     }
   });
 
+  // API to cancel SOS
+  app.post("/api/sos/cancel", (req, res) => {
+    const { senderId } = req.body;
+    broadcastSOS({ 
+      triggered: false, 
+      senderId,
+      type: 'SOS_CANCELLED'
+    });
+    res.json({ success: true });
+  });
+
+  // --- TENT API ---
+  
+  // Create or Join Tent
+  app.post("/api/tents", (req, res) => {
+    const { id, name, member } = req.body;
+    let tent = tents.get(id);
+    
+    if (!tent) {
+      tent = {
+        id,
+        name: name || `Tent ${id.slice(0, 4)}`,
+        members: [member],
+        messages: []
+      };
+      tents.set(id, tent);
+    } else {
+      // Add member if not already in
+      if (!tent.members.find((m: any) => m.id === member.id)) {
+        tent.members.push(member);
+      }
+    }
+    
+    res.json(tent);
+  });
+
+  // Get Tent Details
+  app.get("/api/tents/:id", (req, res) => {
+    const tent = tents.get(req.params.id);
+    if (!tent) return res.status(404).json({ error: "Tent not found" });
+    res.json(tent);
+  });
+
+  // List all Tents (for discovery in this demo)
+  app.get("/api/tents", (req, res) => {
+    res.json(Array.from(tents.values()));
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -245,10 +372,6 @@ async function startServer() {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
 startServer();

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, Camera, Mic, MapPin, Shield, Users, Settings, History, Activity, Play, FileAudio, Image as ImageIcon, CheckCircle2, Download, Trash2, Video, X, AlertTriangle } from 'lucide-react';
+import { Bell, Camera, Mic, MapPin, Shield, Users, Settings, History, Activity, Play, FileAudio, Image as ImageIcon, CheckCircle2, Download, Trash2, Video, X, AlertTriangle, MessageSquare, Send, Sparkles, Loader2 } from 'lucide-react';
 import { AppConfig, EmergencyContact, Evidence } from '../types';
+import { GoogleGenAI } from "@google/genai";
 
 interface SOSDashboardProps {
   config: AppConfig;
@@ -123,11 +124,70 @@ function EvidenceItem({ item, onDelete, onPlayVideo }: { item: Evidence, onDelet
   );
 }
 
-export default function SOSDashboard({ config, evidence, onUpdateConfig, onDeleteEvidence, onDeleteAllEvidence, onClose }: SOSDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'status' | 'contacts' | 'triggers' | 'evidence' | 'settings'>('status');
+export default function SOSDashboard({ config, evidence, onUpdateConfig, onDeleteEvidence, onDeleteAllEvidence, onClose, onTestAlarm }: SOSDashboardProps & { onTestAlarm: () => void }) {
+  const [activeTab, setActiveTab] = useState<'status' | 'contacts' | 'triggers' | 'evidence' | 'settings' | 'ai'>('status');
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
+  
+  // AI Chat State
+  const [aiMessages, setAiMessages] = useState<{ role: 'user' | 'ai', text: string }[]>([
+    { role: 'ai', text: "Hello! I'm your StealthSOS AI assistant. I can help you configure your safety settings, explain how the app works, or provide advice on personal safety. How can I help you today?" }
+  ]);
+  const [aiInput, setAiInput] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [aiMessages]);
+
+  const handleAiChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiInput.trim() || isAiLoading) return;
+
+    const userText = aiInput;
+    setAiInput('');
+    setAiMessages(prev => [...prev, { role: 'user', text: userText }]);
+    setIsAiLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      // Prepare context about the app and current evidence
+      const evidenceContext = evidence.map(e => `- ${e.type} captured at ${new Date(e.timestamp).toLocaleString()}`).join('\n');
+      const systemInstruction = `You are a helpful and discreet personal safety assistant for the StealthSOS app. 
+      The user is currently in the Admin Panel (Evidence Vault).
+      App Features:
+      - Silent SOS (911#)
+      - Voice Detection (Custom keywords)
+      - Motion Detection (Falls/Running)
+      - Tents (Safe Circles with Voice Calls)
+      - Evidence Vault (Photos/Audio/Video)
+      - Guardian View (Remote monitoring)
+      
+      Current Evidence in Vault:
+      ${evidenceContext || 'No evidence captured yet.'}
+      
+      Be concise, professional, and prioritize user safety. If they ask about their evidence, refer to the list provided.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [...aiMessages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: userText }] }],
+        config: {
+          systemInstruction,
+        }
+      });
+
+      const aiText = response.text || "I'm sorry, I couldn't process that request.";
+      setAiMessages(prev => [...prev, { role: 'ai', text: aiText }]);
+    } catch (error) {
+      console.error("AI Chat Error:", error);
+      setAiMessages(prev => [...prev, { role: 'ai', text: "I'm having trouble connecting to my brain right now. Please check your internet connection and try again." }]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
   
   // Contact Form State
   const [isAddingContact, setIsAddingContact] = useState(false);
@@ -207,6 +267,7 @@ export default function SOSDashboard({ config, evidence, onUpdateConfig, onDelet
           { id: 'contacts', label: 'Contacts', icon: Users },
           { id: 'triggers', label: 'Triggers', icon: Bell },
           { id: 'evidence', label: 'Evidence', icon: Camera },
+          { id: 'ai', label: 'AI Assistant', icon: Sparkles },
           { id: 'settings', label: 'Settings', icon: Settings },
         ].map((tab) => (
           <button
@@ -245,6 +306,20 @@ export default function SOSDashboard({ config, evidence, onUpdateConfig, onDelet
                 </div>
               </div>
             )}
+
+            <div className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-500 mb-4">System Actions</h3>
+              <button 
+                onClick={onTestAlarm}
+                className="w-full py-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-bold uppercase tracking-wider hover:bg-red-500 hover:text-white transition-colors flex items-center justify-center gap-2"
+              >
+                <Bell size={18} />
+                Test Emergency Alarm
+              </button>
+              <p className="text-[10px] text-zinc-500 mt-2 text-center">
+                This will trigger the siren on THIS device only. Use to verify audio permissions.
+              </p>
+            </div>
 
             <div className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
               <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-500 mb-4">Recent Activity</h3>
@@ -568,6 +643,50 @@ export default function SOSDashboard({ config, evidence, onUpdateConfig, onDelet
                 </label>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'ai' && (
+          <div className="h-full flex flex-col">
+            <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+              {aiMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] p-4 rounded-2xl ${
+                    msg.role === 'user' 
+                      ? 'bg-orange-600 text-white rounded-tr-none' 
+                      : 'bg-zinc-900 text-zinc-200 border border-zinc-800 rounded-tl-none'
+                  }`}>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  </div>
+                </div>
+              ))}
+              {isAiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-zinc-900 text-zinc-400 border border-zinc-800 p-4 rounded-2xl rounded-tl-none flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="text-xs font-bold uppercase tracking-wider">AI is thinking...</span>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleAiChat} className="mt-auto pt-4 border-t border-zinc-800 flex gap-2">
+              <input 
+                type="text"
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                placeholder="Ask about safety or settings..."
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-sm focus:outline-none focus:border-orange-500"
+              />
+              <button 
+                type="submit"
+                disabled={isAiLoading || !aiInput.trim()}
+                className="w-12 h-12 bg-orange-600 rounded-xl flex items-center justify-center hover:bg-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send size={20} />
+              </button>
+            </form>
           </div>
         )}
       </main>
