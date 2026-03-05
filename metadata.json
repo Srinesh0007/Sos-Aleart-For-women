@@ -1,0 +1,5 @@
+{
+  "name": "StealthSOS",
+  "description": "A stealth SOS application with fake calculator interface, AI-powered danger detection, and automated evidence collection.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+}
